@@ -43,7 +43,7 @@ class Pipeline:
                     "QDRANT_PORT": int(os.getenv("QDRANT_PORT", 6333)),
                     "EMBEDDING_MODEL_NAME": os.getenv("EMBEDDING_MODEL_NAME", "paraphrase-MiniLM-L3-v2"),
                     "LLAMA_MODEL_NAME": os.getenv("LLAMA_MODEL_NAME", "llama3.2:latest"),
-                    "LLAMA_BASE_URL": os.getenv("LLAMA_BASE_URL", "http://ollama:11434"),
+                    "LLAMA_BASE_URL": os.getenv("LLAMA_BASE_URL", "http://host.docker.internal:11434"),
                 }
             )
 
