@@ -65,7 +65,7 @@ class Pipeline:
 
             # Perform search
             response = self.qdrant_client.search(
-                collection_name="default",  # Using the existing collection
+                collection_name="sigma_rules",  # Using the existing collection
                 query_vector=query_vector,
                 limit=5
             )
