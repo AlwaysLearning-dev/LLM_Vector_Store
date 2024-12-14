@@ -8,23 +8,26 @@ import os
 import requests
 from qdrant_client import QdrantClient
 
-# Force DEBUG logging
+# Set up logging configuration
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.DEBUG)
 
-# Create a StreamHandler for stdout if none exists
-if not root_logger.handlers:
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    root_logger.addHandler(handler)
+# Create formatter first
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# Create a file handler for persistent logs
+# Create and configure handlers
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setLevel(logging.DEBUG)
+stream_handler.setFormatter(formatter)
+
 file_handler = logging.FileHandler('/tmp/pipeline_debug.log')
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(formatter)
-root_logger.addHandler(file_handler)
+
+# Add handlers to root logger
+if not root_logger.handlers:
+    root_logger.addHandler(stream_handler)
+    root_logger.addHandler(file_handler)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -37,12 +40,8 @@ class Pipeline:
         LLAMA_BASE_URL: str
 
     def __init__(self) -> None:
-        logger.info("=== Pipeline Initialization Starting ===")
+        logger.debug("=== Pipeline Initialization Starting ===")
         try:
-            # Test logging
-            logger.debug("Debug logging test")
-            logger.info("Info logging test")
-            
             # Valves Configuration
             self.valves = self.Valves(
                 **{
@@ -64,16 +63,9 @@ class Pipeline:
             # Test Qdrant connection
             collection_info = self.qdrant_client.get_collection('sigma_rules')
             logger.debug(f"Qdrant connection successful. Collection info: {collection_info}")
-            
-            # Write test message to file
-            with open('/tmp/pipeline_init.log', 'w') as f:
-                f.write("Pipeline initialized successfully\n")
 
         except Exception as e:
             logger.error(f"Pipeline initialization failed: {e}", exc_info=True)
-            # Write error to file
-            with open('/tmp/pipeline_error.log', 'w') as f:
-                f.write(f"Pipeline initialization failed: {str(e)}\n")
             raise
 
     def search_qdrant(self, term: str) -> List[Dict]:
@@ -111,13 +103,6 @@ class Pipeline:
                     matches.append(payload)
             
             logger.debug(f"Found {len(matches)} matches for term: {term}")
-            
-            # Write search results to file
-            with open('/tmp/search_results.log', 'a') as f:
-                f.write(f"\nSearch for '{term}' found {len(matches)} matches\n")
-                for match in matches:
-                    f.write(f"- {match.get('title', 'No title')}\n")
-            
             return matches
             
         except Exception as e:
@@ -130,10 +115,6 @@ class Pipeline:
             # Get query
             query = prompt or kwargs.get('user_message', '')
             logger.debug(f"Processing query: {query}")
-            
-            # Write query to file
-            with open('/tmp/queries.log', 'a') as f:
-                f.write(f"\nProcessing query: {query}\n")
             
             # Look for quoted terms
             if '"' in query:
@@ -159,7 +140,7 @@ class Pipeline:
                             if match.get('detection'):
                                 result += f"Detection:\n{json.dumps(match['detection'], indent=2)}\n"
                             result += "\n" + "-"*80 + "\n\n"
-                            logger.debug(f"Yielding result: {result[:100]}...")  # Log first 100 chars
+                            logger.debug(f"Yielding result: {result[:100]}...")
                             yield result
                     else:
                         msg = f"No Sigma rules found matching: {', '.join(search_terms)}\n"
@@ -187,14 +168,13 @@ class Pipeline:
         except Exception as e:
             error_msg = f"Error in pipe method: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            with open('/tmp/pipeline_errors.log', 'a') as f:
-                f.write(f"\n{error_msg}\n")
             yield error_msg
 
     def run(self, prompt: str, **kwargs) -> List[Dict[str, Any]]:
         logger.debug("=== Starting run method ===")
         try:
             results = list(self.pipe(prompt=prompt, **kwargs))
+            
             if not results:
                 logger.warning("No results generated")
                 return []
@@ -205,6 +185,4 @@ class Pipeline:
         except Exception as e:
             error_msg = f"Error in run method: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            with open('/tmp/pipeline_errors.log', 'a') as f:
-                f.write(f"\n{error_msg}\n")
             return [{"error": error_msg}]
