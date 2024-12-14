@@ -119,7 +119,7 @@ class Pipeline:
     def create_llm_prompt(self, query: str, context: str) -> str:
         """Create a prompt for the LLM that includes context."""
         print(f"Context: {context}") #debug print
-        rint(f"Query: {query}") #debug print
+        print(f"Query: {query}") #debug print
         return f"""Here are some relevant Sigma detection rules for context:
 
 {context}
