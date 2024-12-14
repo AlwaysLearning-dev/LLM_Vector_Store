@@ -146,7 +146,7 @@ Please be specific and refer to the rules when applicable."""
             # If it's a direct search request, show the rules
             if self.looks_like_search(query):
                 if matches:
-                    yield f'<div style="font-size: 10pt;">\n'
+                    yield f'<div style="font-size: 8pt;">\n'
                     yield f"Found {len(matches)} matching Sigma rules:\n\n"
                     for idx, rule in enumerate(matches, 1):
                         yield f"### Rule {idx}\n"
