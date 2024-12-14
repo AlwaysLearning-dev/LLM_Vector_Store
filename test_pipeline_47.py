@@ -42,8 +42,8 @@ class Pipeline:
                     "QDRANT_HOST": os.getenv("QDRANT_HOST", "qdrant"),
                     "QDRANT_PORT": int(os.getenv("QDRANT_PORT", 6333)),
                     "EMBEDDING_MODEL_NAME": os.getenv("EMBEDDING_MODEL_NAME", "paraphrase-MiniLM-L3-v2"),
-                    "LLAMA_MODEL_NAME": os.getenv("LLAMA_MODEL_NAME", "llama3.2:latest"),
-                    "LLAMA_BASE_URL": os.getenv("LLAMA_BASE_URL", "http://ollama:11434"),
+                    "LLAMA_MODEL_NAME": os.getenv("LLAMA_MODEL_NAME", "llama3.2"),
+                    "LLAMA_BASE_URL": os.getenv("LLAMA_BASE_URL", "http://localhost:11434"),
                 }
             )
 
@@ -131,28 +131,28 @@ class Pipeline:
         return '\n'.join(result)
 
     def generate_llm_response(self, query: str) -> str:
-    """Send the query to the Ollama server for a response."""
-    try:
-        response = requests.post(
-            url=f"{self.valves.LLAMA_BASE_URL}/api/generate",
-            json={
-                "model": self.valves.LLAMA_MODEL_NAME,
-                "prompt": query,
-                "options": {
-                    "seed": 123,
-                    "temperature": 0
+        """Send the query to the Ollama server for a response."""
+        try:
+            response = requests.post(
+                url=f"{self.valves.LLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": self.valves.LLAMA_MODEL_NAME,
+                    "prompt": query,
+                    "options": {
+                        "seed": 123,
+                        "temperature": 0
+                    },
                 },
-            },
-        )
-        response.raise_for_status()
-        result = response.json()
-        generated_text = result.get("response", "").strip()
-        if not generated_text:
-            return "The model did not generate a response. Please try a different query."
-        return generated_text
-    except Exception as e:
-        logger.error(f"Error generating LLM response: {e}", exc_info=True)
-        return "An error occurred while generating the response."
+            )
+            response.raise_for_status()
+            result = response.json()
+            generated_text = result.get("response", "").strip()
+            if not generated_text:
+                return "The model did not generate a response. Please try a different query."
+            return generated_text
+        except Exception as e:
+            logger.error(f"Error generating LLM response: {e}", exc_info=True)
+            return "An error occurred while generating the response."
 
     async def on_startup(self):
         """Initialize resources on startup."""
