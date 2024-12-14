@@ -144,7 +144,7 @@ Please be specific and refer to the rules when applicable."""
                     yield f"### Rule {idx}\n"
                     yield "```yaml\n"
                     yield self.format_rule(rule)
-                    yield "\n```"
+                    yield "\n```\n\n"
                 yield "</div>"
                 return
 
