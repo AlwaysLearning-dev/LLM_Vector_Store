@@ -138,7 +138,7 @@ Please be specific and refer to the rules when applicable."""
             matches = self.search_qdrant(search_terms) if search_terms else []
 
             if matches:
-                yield f'<div style="font-size: 8pt;">'
+                yield '<div style="font-size: 8pt;">'
                 yield f"Found {len(matches)} matching Sigma rules:\n\n"
                 for idx, rule in enumerate(matches, 1):
                     yield f"### Rule {idx}\n"
