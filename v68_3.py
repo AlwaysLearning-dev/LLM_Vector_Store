@@ -5,6 +5,7 @@ date: 2024-12-14
 version: 1.0
 license: MIT
 description: A pipeline for searching and analyzing Sigma rules using Qdrant and LLM
+Updates Needed: Potentially collapsible code boxes. The LM is unaware of output Sigma rules to ask further questions about. 
 requirements: qdrant-client, requests
 """
 
