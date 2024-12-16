@@ -355,4 +355,70 @@ Please be specific and refer to the rules when applicable."""
             if referenced_rules:
                 self.logger.info(f"Found referenced rules: {len(referenced_rules)}")
                 context = self.get_context_from_rules(referenced_rules)
-                llm_prompt = self.
+                llm_prompt = self.create_llm_prompt(query, context)
+                yield from self.get_llm_response(llm_prompt)
+                return
+
+            # If no specific reference, proceed with normal search
+            search_terms = self.extract_search_terms(query)
+            matches = self.advanced_search_qdrant(search_terms) if search_terms else []
+            
+            # Update context with new results
+            if matches:
+                self.context.last_rules = matches
+                self.context.last_query = query
+                self.context.timestamp = datetime.now()
+                self.logger.info(f"Updated context with {len(matches)} new rules")
+
+            # Handle direct search requests
+            if self.looks_like_search(query):
+                if matches:
+                    yield f"Found {len(matches)} matching Sigma rules:\n\n"
+                    for idx, rule in enumerate(matches, 1):
+                        yield f"Rule {idx}: {rule.get('title', 'Untitled')}\n"
+                        yield "```yaml\n"
+                        yield self.format_rule(rule)
+                        yield "\n```\n\n"
+                else:
+                    yield f"No Sigma rules found matching: {', '.join(search_terms)}\n"
+                return
+
+            # For questions, include context if available
+            if self.looks_like_question(query):
+                context = self.get_context_from_rules(matches if matches else self.context.last_rules)
+                llm_prompt = self.create_llm_prompt(query, context)
+                yield from self.get_llm_response(llm_prompt)
+            else:
+                yield from self.get_llm_response(query)
+
+        except Exception as e:
+            self.logger.error(f"Error in pipe: {e}")
+            yield f"Error: {str(e)}"
+
+    def run(self, prompt: str, **kwargs) -> List[Dict[str, Any]]:
+        """Run pipeline and return results."""
+        try:
+            results = list(self.pipe(prompt=prompt, **kwargs))
+            if not results:
+                return []
+            return [{"text": "".join(results)}]
+        except Exception as e:
+            self.logger.error(f"Error in run: {e}")
+            return [{"text": f"Error: {str(e)}"}]
+
+if __name__ == "__main__":
+    # Example usage
+    pipeline = Pipeline()
+    
+    # Example queries to test
+    test_queries = [
+        "search for suspicious processes",
+        "tell me about rule 1",
+        "what does this rule detect?",
+        "search_qdrant:powershell",
+    ]
+    
+    for query in test_queries:
+        print(f"\nQuery: {query}")
+        results = pipeline.run(query)
+        print("Response:", results[0]["text"] if results else "No response")
