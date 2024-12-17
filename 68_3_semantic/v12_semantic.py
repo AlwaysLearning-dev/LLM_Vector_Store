@@ -29,7 +29,7 @@ class Pipeline:
                 "EMBEDDING_MODEL": os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
                 "SIMILARITY_THRESHOLD": float(os.getenv("SIMILARITY_THRESHOLD", 0.3)),
                 "BATCH_SIZE": int(os.getenv("BATCH_SIZE", 20)),
-                "LLM_MODEL_NAME": os.getenv("LLAMA_MODEL_NAME", "llama2"),
+                "LLM_MODEL_NAME": os.getenv("LLAMA_MODEL_NAME", "llama3.2"),
                 "LLM_BASE_URL": os.getenv("OLLAMA_BASE_URL", "http://ollama:11434"),
                 "ENABLE_CONTEXT": os.getenv("ENABLE_CONTEXT", "true").lower() == "true"
             }
