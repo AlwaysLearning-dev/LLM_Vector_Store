@@ -68,6 +68,7 @@ class Pipeline:
             logging.error(f"Vector search error: {e}")
             return []
 
+
     def search_qdrant_keywords(self, terms: List[str]) -> List[Dict]:
         """Fallback to keyword search."""
         try:
