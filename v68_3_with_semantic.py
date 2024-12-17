@@ -1,3 +1,13 @@
+"""
+title: Qdrant Sigma Rules Pipeline
+author: open-webui
+date: 2024-12-14
+version: 1.1
+license: MIT
+description: A pipeline for searching and analyzing Sigma rules using Qdrant and LLM with vector semantic search
+requirements: qdrant-client, requests, sentence-transformers
+"""
+
 from typing import List, Dict, Any, Generator
 import logging
 import json
@@ -5,9 +15,10 @@ import re
 import os
 import requests
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointSearchParams
+from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+from qdrant_client.models import Distance, VectorParams
+from sentence_transformers import SentenceTransformer
 from pydantic import BaseModel
-
 
 class Pipeline:
     class Valves(BaseModel):
@@ -16,9 +27,11 @@ class Pipeline:
         QDRANT_COLLECTION: str
         LLM_MODEL_NAME: str
         LLM_BASE_URL: str
-        EMBEDDING_MODEL_URL: str
         ENABLE_CONTEXT: bool
         LOG_LEVEL: str
+        EMBEDDING_MODEL: str
+        VECTOR_SIZE: int
+        SEMANTIC_SEARCH_LIMIT: int
 
     def __init__(self):
         # Initialize valves with environment variables or defaults
@@ -27,126 +40,309 @@ class Pipeline:
                 "QDRANT_HOST": os.getenv("QDRANT_HOST", "qdrant"),
                 "QDRANT_PORT": int(os.getenv("QDRANT_PORT", 6333)),
                 "QDRANT_COLLECTION": os.getenv("QDRANT_COLLECTION", "sigma_rules"),
-                "LLM_MODEL_NAME": os.getenv("LLM_MODEL_NAME", "llama3.2"),
+                "LLM_MODEL_NAME": os.getenv("LLAMA_MODEL_NAME", "llama3.2"),
                 "LLM_BASE_URL": os.getenv("OLLAMA_BASE_URL", "http://ollama:11434"),
-                "EMBEDDING_MODEL_URL": os.getenv("EMBEDDING_MODEL_URL", "http://embedding-model:8000"),
                 "ENABLE_CONTEXT": os.getenv("ENABLE_CONTEXT", "true").lower() == "true",
                 "LOG_LEVEL": os.getenv("LOG_LEVEL", "INFO"),
+                "EMBEDDING_MODEL": os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
+                "VECTOR_SIZE": int(os.getenv("VECTOR_SIZE", "384")),
+                "SEMANTIC_SEARCH_LIMIT": int(os.getenv("SEMANTIC_SEARCH_LIMIT", "20"))
             }
         )
 
-        logging.basicConfig(level=self.valves.LOG_LEVEL)
+        # Initialize Qdrant client
         self.qdrant = QdrantClient(
             host=self.valves.QDRANT_HOST,
             port=self.valves.QDRANT_PORT
         )
+        
+        # Initialize the embedding model
+        self.embedding_model = SentenceTransformer(self.valves.EMBEDDING_MODEL)
 
-    def get_embedding(self, text: str) -> List[float]:
-        """Generate embedding for the query text."""
+    async def on_startup(self):
+        """Verify connections and create collection if needed."""
         try:
-            response = requests.post(self.valves.EMBEDDING_MODEL_URL, json={"text": text})
-            response.raise_for_status()
-            embedding = response.json().get("embedding", [])
-            if not embedding:
-                raise ValueError("Empty embedding returned.")
-            return embedding
+            # Check if collection exists, if not create it
+            collections = self.qdrant.get_collections().collections
+            collection_names = [c.name for c in collections]
+            
+            if self.valves.QDRANT_COLLECTION not in collection_names:
+                self.qdrant.create_collection(
+                    collection_name=self.valves.QDRANT_COLLECTION,
+                    vectors_config=VectorParams(
+                        size=self.valves.VECTOR_SIZE,
+                        distance=Distance.COSINE
+                    )
+                )
+                print(f"Created new collection: {self.valves.QDRANT_COLLECTION}")
+            
+            collection_info = self.qdrant.get_collection(self.valves.QDRANT_COLLECTION)
+            print(f"Connected to Qdrant collection: {collection_info}")
         except Exception as e:
-            logging.error(f"Error generating embedding: {e}")
+            print(f"Error connecting to Qdrant: {e}")
             raise
 
-    def search_qdrant_vector(self, query_vector: List[float], limit: int = 10) -> List[Dict]:
-        """Search Qdrant using vector similarity."""
-        try:
-            search_result = self.qdrant.search(
-                collection_name=self.valves.QDRANT_COLLECTION,
-                query_vector=query_vector,
-                limit=limit,
-                with_payload=True
-            )
-            return [result.payload for result in search_result]
-        except Exception as e:
-            logging.error(f"Vector search error: {e}")
-            return []
-
-
-    def search_qdrant_keywords(self, terms: List[str]) -> List[Dict]:
-        """Fallback to keyword search."""
-        try:
-            scroll_result = self.qdrant.scroll(
-                collection_name=self.valves.QDRANT_COLLECTION,
-                limit=100,
-                with_payload=True
-            )
-            matches = []
-            for point in scroll_result[0]:
-                payload = point.payload
-                searchable_text = ' '.join(
-                    [str(v).lower() for v in payload.values() if isinstance(v, (str, list, dict))]
-                )
-                if any(term.lower() in searchable_text for term in terms):
-                    matches.append(payload)
-            return matches
-        except Exception as e:
-            logging.error(f"Keyword search error: {e}")
-            return []
-
-    def search_qdrant(self, query: str) -> List[Dict]:
-        """Search Qdrant with vector embeddings first, fallback to keywords."""
-        try:
-            query_vector = self.get_embedding(query)
-            logging.info("Performing vector search.")
-            results = self.search_qdrant_vector(query_vector)
-            if results:
-                return results
-        except Exception as e:
-            logging.warning(f"Vector search failed: {e}. Falling back to keywords.")
-        terms = self.extract_search_terms(query)
-        return self.search_qdrant_keywords(terms)
+    async def on_shutdown(self):
+        """Clean up resources."""
+        pass
 
     def extract_search_terms(self, query: str) -> List[str]:
-        """Extract potential keywords or phrases from query."""
+        """Extract search terms from query."""
         phrases = re.findall(r'"([^"]*)"', query)
         if not phrases:
-            return [term.strip() for term in query.split()]
+            # Look for terms after "about" or "related to"
+            about_match = re.search(r'about\s+(\w+)', query.lower())
+            related_match = re.search(r'related to\s+(\w+)', query.lower())
+            if about_match:
+                return [about_match.group(1)]
+            if related_match:
+                return [related_match.group(1)]
+            terms = [term.strip() for term in query.split() if term.strip()]
+            return terms
         return phrases
 
+    def get_text_embedding(self, text: str) -> List[float]:
+        """Generate embedding vector for text using sentence-transformers."""
+        try:
+            embedding = self.embedding_model.encode(text)
+            return embedding.tolist()
+        except Exception as e:
+            print(f"Error generating embedding: {e}")
+            return []
+
+    def search_qdrant(self, terms: List[str], query: str = None) -> List[Dict]:
+        """Search for rules using both keyword and semantic search."""
+        try:
+            matches = set()
+            
+            # Keyword search
+            result = self.qdrant.scroll(
+                collection_name=self.valves.QDRANT_COLLECTION,
+                limit=100,
+                with_payload=True,
+                with_vectors=False
+            )
+
+            if result and result[0]:
+                for point in result[0]:
+                    payload = point.payload
+                    searchable_parts = []
+                    
+                    # Add simple fields
+                    for field in ['title', 'id', 'status', 'description', 'author', 
+                                'date', 'modified', 'level', 'filename']:
+                        if payload.get(field):
+                            searchable_parts.append(str(payload[field]))
+                    
+                    # Handle references
+                    if payload.get('references'):
+                        searchable_parts.extend(str(ref) for ref in payload['references'])
+                    
+                    # Handle tags (including MITRE ATT&CK)
+                    if payload.get('tags'):
+                        searchable_parts.extend(str(tag) for tag in payload['tags'])
+                        for tag in payload['tags']:
+                            if tag.startswith('attack.'):
+                                tag_parts = tag.split('.')
+                                searchable_parts.extend(tag_parts)
+                    
+                    # Handle logsource
+                    if payload.get('logsource'):
+                        searchable_parts.extend(str(v) for v in payload['logsource'].values())
+                    
+                    # Handle detection rules
+                    if payload.get('detection'):
+                        detection_str = json.dumps(payload['detection'])
+                        searchable_parts.append(detection_str)
+                    
+                    # Handle false positives
+                    if payload.get('falsepositives'):
+                        searchable_parts.extend(str(fp) for fp in payload['falsepositives'])
+                    
+                    searchable_text = ' '.join(searchable_parts).lower()
+                    
+                    for term in terms:
+                        if term.lower() in searchable_text:
+                            matches.add((payload.get('title', ''), json.dumps(payload)))
+                            break
+
+            # Semantic search if query is provided
+            if query:
+                query_vector = self.get_text_embedding(query)
+                if query_vector:
+                    semantic_results = self.qdrant.search(
+                        collection_name=self.valves.QDRANT_COLLECTION,
+                        query_vector=query_vector,
+                        limit=self.valves.SEMANTIC_SEARCH_LIMIT,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                    
+                    for hit in semantic_results:
+                        matches.add((
+                            hit.payload.get('title', ''),
+                            json.dumps(hit.payload)
+                        ))
+
+            return [json.loads(match[1]) for match in matches]
+
+        except Exception as e:
+            print(f"Qdrant search error: {e}")
+            return []
+
     def format_rule(self, rule: Dict) -> str:
-        """Format Sigma rule into YAML-like format."""
+        """Format rule in Sigma YAML."""
         yaml_output = []
-        for field, value in rule.items():
-            if isinstance(value, dict):
+        fields = [
+            'title', 'id', 'status', 'description', 'references', 'author',
+            'date', 'modified', 'tags', 'logsource', 'detection',
+            'falsepositives', 'level', 'filename'
+        ]
+        
+        for field in fields:
+            value = rule.get(field)
+            if field == 'description':
+                if value:
+                    yaml_output.append(f"description: |")
+                    for line in str(value).split('\n'):
+                        yaml_output.append(f"    {line.strip()}")
+                else:
+                    yaml_output.append("description: |")
+                    yaml_output.append("    No description provided")
+                    
+            elif field in ['logsource', 'detection']:
                 yaml_output.append(f"{field}:")
-                for key, val in value.items():
-                    yaml_output.append(f"  {key}: {val}")
+                if isinstance(value, dict):
+                    dict_lines = json.dumps(value, indent=4).split('\n')
+                    for line in dict_lines[1:-1]:
+                        yaml_output.append(f"    {line.strip()}")
+                else:
+                    yaml_output.append("    {}")
+                    
             elif isinstance(value, list):
                 yaml_output.append(f"{field}:")
-                for item in value:
-                    yaml_output.append(f"  - {item}")
+                if value:
+                    for item in value:
+                        yaml_output.append(f"    - {item}")
+                else:
+                    yaml_output.append("    - none")
+                    
+            elif isinstance(value, dict):
+                yaml_output.append(f"{field}:")
+                if value:
+                    dict_lines = json.dumps(value, indent=4).split('\n')
+                    for line in dict_lines[1:-1]:
+                        yaml_output.append(f"    {line.strip()}")
+                else:
+                    yaml_output.append("    {}")
+                    
             else:
-                yaml_output.append(f"{field}: {value}")
-        return "\n".join(yaml_output)
+                yaml_output.append(f"{field}: {value if value is not None else 'none'}")
+                
+            if field in ['description', 'detection', 'logsource']:
+                yaml_output.append("")
+                
+        return '\n'.join(yaml_output)
+
+    def get_context_from_rules(self, rules: List[Dict]) -> str:
+        """Create context string from rules for LLM."""
+        context = []
+        for idx, rule in enumerate(rules, 1):
+            context.append(f"Rule {idx}:")
+            context.append(f"Title: {rule.get('title', 'Untitled')}")
+            if rule.get('description'):
+                context.append(f"Description: {rule['description']}")
+            if rule.get('detection'):
+                context.append("Detection:")
+                context.append(json.dumps(rule['detection'], indent=2))
+            context.append("---")
+        return '\n'.join(context)
+
+    def looks_like_search(self, query: str) -> bool:
+        """Check if query is a search request."""
+        if '"' in query:
+            return True
+        search_words = ['search', 'find', 'show', 'list', 'get']
+        query_words = query.lower().split()
+        if any(word in query_words for word in search_words):
+            return True
+        return len(query_words) <= 3
+
+    def looks_like_question(self, query: str) -> bool:
+        """Check if query is a question about rules."""
+        question_words = ['what', 'how', 'why', 'when', 'where', 'who', 'which', 'explain']
+        contains_about = 'about' in query.lower()
+        starts_with_question = any(query.lower().startswith(word) for word in question_words)
+        return starts_with_question or contains_about
+
+    def create_llm_prompt(self, query: str, context: str) -> str:
+        """Create a prompt for the LLM that includes context."""
+        return f"""Here are some relevant Sigma detection rules for context:
+
+{context}
+
+Based on these rules, please answer this question:
+{query}
+
+Please be specific and refer to the rules when applicable."""
 
     def pipe(self, prompt: str = None, **kwargs) -> Generator[str, None, None]:
-        """Pipeline logic to process queries and return results."""
-        query = prompt or kwargs.get("user_message", "")
+        """Process input and return results."""
+        query = prompt or kwargs.get('user_message', '')
         if not query:
-            yield "No query provided."
             return
+
         try:
-            # Search Qdrant for results
-            results = self.search_qdrant(query)
-            if results:
-                yield f"Found {len(results)} matching Sigma rules:\n\n"
-                for idx, rule in enumerate(results, 1):
-                    yield f"Rule {idx}: {rule.get('title', 'Untitled')}\n"
-                    yield "```yaml\n"
-                    yield self.format_rule(rule)
-                    yield "\n```\n\n"
+            # Extract potential search terms
+            search_terms = self.extract_search_terms(query)
+            
+            # Search using both keyword and semantic search
+            matches = self.search_qdrant(search_terms, query) if search_terms else []
+            
+            # If it's a direct search request, show the rules
+            if self.looks_like_search(query):
+                if matches:
+                    yield f"Found {len(matches)} matching Sigma rules:\n\n"
+                    for idx, rule in enumerate(matches, 1):
+                        # Rule number and title outside of code block
+                        yield f"Rule {idx}: {rule.get('title', 'Untitled')}\n"
+                        # Rule content in code block
+                        yield "```yaml\n"
+                        yield self.format_rule(rule)
+                        yield "\n```\n\n"
+                    return
+                else:
+                    yield f"No Sigma rules found matching: {', '.join(search_terms)}\n"
+                    return
+            
+            # If it's a question and context is enabled, include matching rules
+            if self.looks_like_question(query) and matches and self.valves.ENABLE_CONTEXT:
+                context = self.get_context_from_rules(matches)
+                llm_prompt = self.create_llm_prompt(query, context)
             else:
-                yield f"No matches found for query: {query}"
+                llm_prompt = query
+
+            # Get LLM response
+            response = requests.post(
+                url=f"{self.valves.LLM_BASE_URL}/api/generate",
+                json={"model": self.valves.LLM_MODEL_NAME, "prompt": llm_prompt},
+                stream=True
+            )
+            
+            for line in response.iter_lines(decode_unicode=True):
+                if line:
+                    try:
+                        data = json.loads(line)
+                        yield data.get("response", "")
+                    except json.JSONDecodeError:
+                        continue
+
         except Exception as e:
-            yield f"Error processing query: {str(e)}"
+            yield f"Error: {str(e)}"
 
     def run(self, prompt: str, **kwargs) -> List[Dict[str, Any]]:
-        """Run the pipeline and return results."""
-        return [{"text": "".join(self.pipe(prompt=prompt, **kwargs))}]
+        """Run pipeline and return results."""
+        results = list(self.pipe(prompt=prompt, **kwargs))
+        if not results:
+            return []
+        return [{"text": "".join(results)}]
