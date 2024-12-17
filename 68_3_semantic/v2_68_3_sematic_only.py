@@ -19,7 +19,7 @@ class Pipeline:
         # Initialize valves with environment variables or defaults
         self.valves = self.Valves(
             **{
-                "QDRANT_HOST": os.getenv("QDRANT_HOST", "localhost"),
+                "QDRANT_HOST": os.getenv("QDRANT_HOST", "qdrant"),
                 "QDRANT_PORT": int(os.getenv("QDRANT_PORT", 6333)),
                 "QDRANT_COLLECTION": os.getenv("QDRANT_COLLECTION", "sigma_rules"),
                 "EMBEDDING_MODEL": os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
