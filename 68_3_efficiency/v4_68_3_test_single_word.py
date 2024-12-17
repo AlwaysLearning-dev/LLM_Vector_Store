@@ -84,7 +84,7 @@ class Pipeline:
         try:
             result = self.qdrant.scroll(
                 collection_name=self.valves.QDRANT_COLLECTION,
-                limit=100,
+                limit=3000,
                 with_payload=True,
                 with_vectors=False
             )
