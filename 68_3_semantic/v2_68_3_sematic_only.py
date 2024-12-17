@@ -56,7 +56,29 @@ class Pipeline:
         except Exception as e:
             print(f"Startup error: {e}")
             raise
-
+            
+    # Add this to check what's in your collection
+    def verify_collection(self):
+        """Verify collection contents."""
+        try:
+            count = self.qdrant.count(collection_name=self.valves.QDRANT_COLLECTION)
+            print(f"Total points in collection: {count}")
+        
+            # Get a sample point
+            result = self.qdrant.scroll(
+                collection_name=self.valves.QDRANT_COLLECTION,
+                limit=1,
+                with_payload=True,
+                with_vectors=True
+            )
+            if result and result[0]:
+                print("Sample point vector dimensions:", len(result[0][0].vector['default']))
+                print("Sample point payload keys:", result[0][0].payload.keys())
+            return count.count
+        except Exception as e:
+            print(f"Verification error: {e}")
+            return 0
+            
     def search_qdrant(self, query: str, limit: int = 20) -> List[Dict]:
         """Search for rules using vector similarity."""
         try:
